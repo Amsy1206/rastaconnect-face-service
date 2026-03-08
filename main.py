@@ -37,25 +37,27 @@ app.add_middleware(
 )
 
 face_app = None
-model_init_error = None
 
 
-@app.on_event("startup")
-def startup_event() -> None:
+def get_face_app():
     global face_app
-    global model_init_error
-    try:
-        face_app = insightface.app.FaceAnalysis(name="buffalo_l")
+    if face_app is None:
+        face_app = insightface.app.FaceAnalysis(
+            name="buffalo_l",
+            providers=["CPUExecutionProvider"],
+        )
         face_app.prepare(ctx_id=0, det_size=(640, 640))
-        model_init_error = None
-    except Exception as error:
-        face_app = None
-        model_init_error = str(error)
+    return face_app
 
 
 class VerifyFaceRequest(BaseModel):
     embedding1: List[float]
     embedding2: List[float]
+
+
+@app.get("/")
+async def root() -> dict:
+    return {"status": "ok"}
 
 
 @app.get("/health")
@@ -65,12 +67,6 @@ async def health() -> dict:
 
 @app.post("/extract-embedding")
 async def extract_embedding(image: UploadFile = File(...)) -> List[float]:
-    if face_app is None:
-        detail = "Face model is not loaded yet."
-        if model_init_error:
-            detail = f"{detail} Startup error: {model_init_error}"
-        raise HTTPException(status_code=503, detail=detail)
-
     content = await image.read()
     if not content:
         raise HTTPException(status_code=400, detail="Invalid image format")
@@ -88,7 +84,7 @@ async def extract_embedding(image: UploadFile = File(...)) -> List[float]:
     bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
 
     try:
-        faces = face_app.get(bgr_array)
+        faces = get_face_app().get(bgr_array)
     except Exception:
         raise HTTPException(status_code=500, detail="Face analysis failed")
 
